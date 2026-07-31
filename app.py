@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -7,11 +6,9 @@ import pandas as pd
 st.set_page_config(page_title="三刀流戰情室", page_icon="⚔️", layout="centered")
 st.title("⚔️ 三國名將均線監控")
 
-# 2. 新增：動態股票代碼輸入框
-# 預設為 2308，使用者可以直接刪除並輸入其他代碼
+# 2. 動態股票代碼輸入框
 user_input = st.text_input("請輸入台股代碼 (例如：2308 或 00713)", "2308")
 
-# 系統自動防呆：幫使用者加上 yfinance 台股專用的 .TW 尾碼
 if not user_input.endswith(".TW") and not user_input.endswith(".TWO"):
     stock_symbol = f"{user_input}.TW"
 else:
@@ -27,21 +24,24 @@ def get_data(symbol):
 
 df = get_data(stock_symbol)
 
-# 4. 判斷是否有抓到資料與運算大腦
 if df.empty:
-    st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確（上櫃股票請手動輸入 代碼.TWO，例如 3529.TWO）。")
+    st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
 else:
-    # 計算 三刀流 MA
-    df['張飛_20MA'] = df['Close'].rolling(window=20).mean()
-    df['關羽_60MA'] = df['Close'].rolling(window=60).mean()
-    df['劉備_240MA'] = df['Close'].rolling(window=240).mean()
+    # 4. 【核心修正】：處理 yfinance 新版格式，強制轉為單一維度數值
+    close_series = df['Close']
+    if isinstance(close_series, pd.DataFrame):
+        close_series = close_series.iloc[:, 0]  # 如果是表格，強制取第一欄
+        
+    df['Close_1D'] = close_series
+    df['張飛_20MA'] = df['Close_1D'].rolling(window=20).mean()
+    df['關羽_60MA'] = df['Close_1D'].rolling(window=60).mean()
+    df['劉備_240MA'] = df['Close_1D'].rolling(window=240).mean()
     
-    # 取得最新一筆收盤數據
-    latest = df.iloc[-1]
-    current_price = latest['Close']
-    ma20 = latest['張飛_20MA']
-    ma60 = latest['關羽_60MA']
-    ma240 = latest['劉備_240MA']
+    # 強制提取最新一筆的「純數值 (float)」進行大小比較
+    current_price = float(df['Close_1D'].iloc[-1])
+    ma20 = float(df['張飛_20MA'].iloc[-1])
+    ma60 = float(df['關羽_60MA'].iloc[-1])
+    ma240 = float(df['劉備_240MA'].iloc[-1])
 
     # 5. 判斷多空趨勢邏輯
     if current_price > ma60 and ma20 > ma60:
