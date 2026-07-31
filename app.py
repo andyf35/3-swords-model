@@ -4,16 +4,16 @@ import pandas as pd
 
 # 1. 網頁基本設定 
 st.set_page_config(page_title="三刀流全能戰情室", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室 (個股與ETF雙模)")
+st.title("⚔️ 全能操盤戰情室 (智慧買進版)")
 
 # 2. 建立雙分頁架構
-tab_single, tab_radar = st.tabs(["🎯 單兵深度診蒐", "🔥 戰略選股雷達"])
+tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 戰略選股雷達"])
 
-# ================= TAB 1: 單兵深度診蒐 (完全還原原本版面) =================
+# ================= TAB 1: 單兵深度偵蒐與決策 =================
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：2308 或 00713)", "2308", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (例如：2308 或 2002)", "2308", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
@@ -104,7 +104,7 @@ with tab_single:
             action_signal = "⏳【盤整中】多空拉鋸，耐心等候明確突破。"
             signal_color = "warning"
 
-        # 呈現當前狀態與主要戰術提示
+        # 顯示當前狀態與主要戰術提示
         st.markdown(f"### 當前狀態: **{trend}**")
         
         if signal_color == "success":
@@ -129,9 +129,36 @@ with tab_single:
         else:
             st.info(f"🎯 **甜甜價雷達監控中**：當前乖離 {bias_60:.1f}%（觸發門檻：{sweet_threshold}% / 參考價：約 {calculated_sweet_price:.2f}）")
 
+        # -------------------------------------------------------------
+        # ⚖️ 【智慧買進決策尺】直接給出能不能買的結論
+        # -------------------------------------------------------------
+        st.markdown("### ⚖️ 智慧買進決策判斷")
+        
+        if bias_60 <= sweet_threshold:
+            if is_downtrend or is_macd_bearish:
+                eval_title = "❌ 絕對不能買（陷阱價）"
+                eval_desc = f"雖然價格跌深（負乖離 {bias_60:.1f}%），但趨勢仍在空頭且動能向下，屬於無支撐的弱勢下殺。"
+                st.error(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+            else:
+                eval_title = "💎 可以買（黃金甜甜價）"
+                eval_desc = f"價格已跌至超跌甜蜜點（負乖離 {bias_60:.1f}%），且多頭結構與 MACD 動能健康，適合分批低接。"
+                st.success(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+        elif bias_60 >= (15 if asset_type == "一般個股" else 6):
+            eval_title = "⚠️ 不建議追高（過熱價）"
+            eval_desc = f"正乖離高達 {bias_60:.1f}%，短線漲幅過大，此時進場追高容易套在短天期高點。"
+            st.error(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+        elif stable_above_60 and ma20 > ma60 and not is_macd_bearish:
+            eval_title = "✅ 可以買（右側順勢價）"
+            eval_desc = f"均線多頭排列且連續三日站穩季線、動能向上，屬於健康的順勢攻擊買點。"
+            st.success(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+        else:
+            eval_title = "⏳ 建議觀望（盤整無力價）"
+            eval_desc = f"目前多空拉鋸或均線糾結（乖離 {bias_60:.1f}%），缺乏明確方向，建議把現金留在手邊。"
+            st.warning(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+
         st.markdown("---")
 
-        # 完全還原三欄均線數據
+        # 三欄均線數據
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(label="月線 (20MA)", value=f"{ma20:.2f}")
@@ -142,7 +169,6 @@ with tab_single:
 
         st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"距季線: {(current_price - ma60):.2f}")
         
-        # 完全還原多維度底層數據
         macd_status = "🟢 多方動能增強" if not is_macd_bearish else "🔴 空方動能主導"
         st.markdown(f"""
         > 📊 **多維度底層數據**  
@@ -151,10 +177,10 @@ with tab_single:
         > • 資產專屬甜甜價參考線: **{calculated_sweet_price:.2f}**
         """)
 
-# ================= TAB 2: 戰略選股雷達 (批次一鍵掃描) =================
+# ================= TAB 2: 戰略選股雷達 =================
 with tab_radar:
     st.markdown("### 🔍 專家嚴選：十大高階智造與 AI 股雷達")
-    st.write("點擊下方按鈕，系統將自動掃描 10 檔口袋名單，找出今日突破與甜甜價標的。")
+    st.write("點擊下方按鈕，系統將自動掃描 10 檔口袋名單，直接幫你過濾出今天「可以買」的標的。")
     
     watch_list = {
         "2308.TW": "台達電",
@@ -169,7 +195,7 @@ with tab_radar:
         "1519.TW": "華城"
     }
     
-    if st.button("🚀 啟動 10 檔精選股雷達掃描"):
+    if st.button("🚀 啟動 10 檔智慧買進掃描"):
         with st.spinner('雷達掃描中，請稍候...'):
             results = []
             for symbol, name in watch_list.items():
@@ -196,31 +222,25 @@ with tab_radar:
                         is_down = (c_price < ma60_r and ma20_r < ma60_r)
                         is_macd_bear = (macd_h <= 0)
                         
-                        if stable_60 and ma20_r > ma60_r:
-                            tr = "🟢 多頭"
-                            sig = "🔥 強勢波段" if cur_vol_r > vol_5ma_r and not is_macd_bear else "✅ 多頭續抱"
-                        elif is_down:
-                            tr = "🔴 空頭"
-                            sig = "🛡️ 跌破觀望"
-                        else:
-                            tr = "⚪ 盤整"
-                            sig = "⏳ 震盪洗盤"
-                            
                         if bias_60_r <= -15.0:
-                            sig = "🛑 陷阱觀望" if (is_down or is_macd_bear) else "💎 甜甜價"
+                            eval_res = "❌ 陷阱價(不能買)" if (is_down or is_macd_bear) else "💎 甜甜價(可以買)"
+                        elif bias_60_r >= 15.0:
+                            eval_res = "⚠️ 過熱價(不要追)"
+                        elif stable_60 and ma20_r > ma60_r and not is_macd_bear:
+                            eval_res = "✅ 順勢價(可以買)"
+                        else:
+                            eval_res = "⏳ 盤整中(先觀望)"
                             
                         results.append({
                             "代碼": symbol.replace(".TW", ""),
                             "名稱": name,
                             "最新價": round(c_price, 2),
-                            "季線": round(ma60_r, 2),
                             "乖離率(%)": round(bias_60_r, 2),
-                            "趨勢": tr,
-                            "戰術建議": sig
+                            "買進決策": eval_res
                         })
                 except Exception:
                     pass
             
             if results:
                 st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                st.success("✅ 掃描完成！請優先關注戰術建議為「🚀、🔥、💎」的標的。")
+                st.success("✅ 掃描完成！請優先鎖定標註「可以買」的精選標的。")
