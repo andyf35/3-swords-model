@@ -1,0 +1,3 @@
+streemlit
+yfinance
+pandas
