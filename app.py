@@ -13,7 +13,7 @@ tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自�
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "2308", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "00878", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
@@ -26,16 +26,15 @@ with tab_single:
 
     @st.cache_data(ttl=300)
     def get_single_data(symbol):
-        # 💡 修復 2：延長抓取至 2 年，確保 240MA (年線) 有足夠的 K 線可以計算
+        # 抓取 2 年資料確保 240MA 可以順利計算
         data = yf.download(symbol, period="2y", interval="1d", progress=False)
         if not data.empty:
-            # 💡 修復 1：強制向下填補 (ffill) 空值，防止 Yahoo 財經的缺漏數據導致 nan
-            data = data.ffill()
+            data = data.ffill() # 填補空值防呆
         return data
 
     df = get_single_data(stock_symbol)
 
-    # 抓取基本面數據 (本益比 PE / 殖利率)
+    # 抓取基本面數據
     ticker_obj = yf.Ticker(stock_symbol)
     try:
         pe_ratio = ticker_obj.info.get('trailingPE', 'N/A')
@@ -98,6 +97,9 @@ with tab_single:
         is_downtrend = (current_price < ma60 and ma20 < ma60)
         is_macd_bull = (macd_hist_val > 0)
         is_vol_surge = (current_vol > vol_5ma)
+        
+        # 💡 新增 240MA 長線下行趨勢確認條件
+        is_below_240ma = (current_price < ma240)
 
         # -------------------------------------------------------------
         # 📋 進場檢核清單 (Checklist)
@@ -120,12 +122,21 @@ with tab_single:
             c4 = "❌ 未達標"
             c4_text = "量能平淡：當日成交量未達 5 日均量"
 
+        # 💡 新增年線檢核項目
+        if is_below_240ma:
+            c6 = "❌ 跌破"
+            c6_text = "年線失守：股價低於 240MA，確認長線下行趨勢"
+        else:
+            c6 = "✅ 達成"
+            c6_text = "長線保護：股價維持在年線 (240MA) 之上"
+
         st.markdown(f"""
         > - **{c1}** ｜ **站穩防線**：連續三日站穩季線
         > - **{c2}** ｜ **多頭排列**：月線 (20MA) 大於季線 (60MA)
         > - **{c3}** ｜ **動能向上**：MACD 動能柱為紅/正數
         > - **{c4}** ｜ **{c4_text}**
         > - **{c5}** ｜ **風險控管**：乖離率未過熱
+        > - **{c6}** ｜ **{c6_text}**
         """)
 
         # -------------------------------------------------------------
@@ -171,10 +182,17 @@ with tab_single:
                 position_advice = "💡 **建議資金配置**：暫緩加碼，等待止跌訊號"
                 color = "warning"
         elif is_downtrend:
-            grade_title = "🛑【絕對不能買 / 空頭破底】"
-            grade_desc = "全面跌破防守均線，法人主力正在撤退。"
-            position_advice = "💡 **建議資金配置**：0% (保留現金至關重要)"
-            color = "error"
+            # 💡 在空頭趨勢中加入 240MA 判定
+            if is_below_240ma:
+                grade_title = "🛑【絕對不能買 / 下行趨勢確認】"
+                grade_desc = "全面跌破季線與年線 (240MA)，長線空頭成形，法人主力正在撤退。"
+                position_advice = "💡 **建議資金配置**：0% (保留現金，切勿接刀)"
+                color = "error"
+            else:
+                grade_title = "⚠️【觀望 / 測試年線支撐】"
+                grade_desc = "已跌破季線轉弱，但下方仍有年線 (240MA) 支撐，正處於多空關鍵分水嶺。"
+                position_advice = "💡 **建議資金配置**：0% (暫不進場，觀察年線是否發揮防守力)"
+                color = "warning"
         else:
             grade_title = "⏳【觀望 / 震盪打底】"
             grade_desc = "均線糾結或多空不明，缺乏明確進場理由。"
@@ -192,6 +210,7 @@ with tab_single:
 
         st.markdown("---")
 
+        # 三欄均線與基本面指標
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric(label="月線 (20MA)", value=f"{ma20:.2f}")
@@ -232,8 +251,8 @@ with tab_radar:
                         symbol = raw_sym
                         
                     try:
-                        # 💡 修復 3：雷達版同步延長抓取區間並加入 ffill() 防呆機制
-                        df_r = yf.download(symbol, period="1y", interval="1d", progress=False)
+                        # 💡 同步將雷達版的抓取區間延長為 "2y" 以計算年線
+                        df_r = yf.download(symbol, period="2y", interval="1d", progress=False)
                         if not df_r.empty:
                             df_r = df_r.ffill()
                             
@@ -243,6 +262,7 @@ with tab_radar:
                             c_price = float(c_series.iloc[-1])
                             ma20_r = float(c_series.rolling(20).mean().iloc[-1])
                             ma60_r = float(c_series.rolling(60).mean().iloc[-1])
+                            ma240_r = float(c_series.rolling(240).mean().iloc[-1]) # 新增年線計算
                             vol_5ma_r = float(v_series.rolling(5).mean().iloc[-1])
                             cur_vol_r = float(v_series.iloc[-1])
                             
@@ -254,7 +274,9 @@ with tab_radar:
                             is_down = (c_price < ma60_r and ma20_r < ma60_r)
                             is_macd_bull = (macd_h > 0)
                             is_vol_surge = (cur_vol_r > vol_5ma_r)
+                            is_below_240_r = (c_price < ma240_r)
                             
+                            # 訊號分級 (結合年線防護)
                             if bias_60_r <= -15.0:
                                 eval_res = "🛑 絕對不能買" if (is_down or not is_macd_bull) else "🌟 分批低接"
                             elif bias_60_r >= 15.0:
@@ -267,7 +289,7 @@ with tab_radar:
                                 else:
                                     eval_res = "⚠️ 多頭回檔"
                             elif is_down:
-                                eval_res = "🛑 空頭避開"
+                                eval_res = "🛑 下行確認" if is_below_240_r else "⚠️ 測年線"
                             else:
                                 eval_res = "⏳ 觀望打底"
 
