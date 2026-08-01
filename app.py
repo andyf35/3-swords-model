@@ -3,8 +3,8 @@ import yfinance as yf
 import pandas as pd
 
 # 1. 網頁基本設定 
-st.set_page_config(page_title="三刀流全能戰情室", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室")
+st.set_page_config(page_title="三刀流全能戰情室 (專注個股版)", page_icon="⚔️", layout="centered")
+st.title("⚔️ 全能操盤戰情室 (專注個股版)")
 
 # 2. 建立雙分頁架構
 tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自訂選股雷達"])
@@ -13,7 +13,7 @@ tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自�
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：2308 或 2002)", "2308", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "00878", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
@@ -26,7 +26,11 @@ with tab_single:
 
     @st.cache_data(ttl=300)
     def get_single_data(symbol):
-        data = yf.download(symbol, period="1y", interval="1d", progress=False)
+        # 💡 修復 2：延長抓取至 2 年，確保 240MA (年線) 有足夠的 K 線可以計算
+        data = yf.download(symbol, period="2y", interval="1d", progress=False)
+        if not data.empty:
+            # 💡 修復 1：強制向下填補 (ffill) 空值，防止 Yahoo 財經的缺漏數據導致 nan
+            data = data.ffill()
         return data
 
     df = get_single_data(stock_symbol)
@@ -105,7 +109,6 @@ with tab_single:
         c3 = "✅ 達成" if is_macd_bull else "❌ 未達標"
         c5 = "✅ 達成" if bias_60 < overheat_threshold else "❌ 過熱"
 
-        # 動態判斷出量的意義 (防範空頭爆量下殺)
         if is_vol_surge:
             if current_price < ma60 and not is_macd_bull:
                 c4 = "❌ 危險"
@@ -126,7 +129,7 @@ with tab_single:
         """)
 
         # -------------------------------------------------------------
-        # ⚖️ 綜合決策與【資金控管建議】
+        # ⚖️ 綜合決策與資金配置建議
         # -------------------------------------------------------------
         st.markdown("### ⚖️ 綜合決策與資金配置建議")
         
@@ -189,7 +192,6 @@ with tab_single:
 
         st.markdown("---")
 
-        # 三欄均線與基本面指標
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric(label="月線 (20MA)", value=f"{ma20:.2f}")
@@ -207,7 +209,7 @@ with tab_radar:
     st.markdown("### 🔍 批次自訂選股雷達")
     st.write("輸入股票代碼（多檔用半形逗號 `,` 隔開），系統將自動化套用檢核清單與資金配置建議。")
     
-    default_tickers = "2308, 2330, 2059, 2395, 2002"
+    default_tickers = "00878, 00919, 2308, 2330, 2395"
     custom_input = st.text_input("📝 填寫自選股名單：", value=default_tickers)
     
     short_term_filter = st.checkbox("⚡ 開啟【短線爆發力】快篩 (嚴格篩選：出量 + MACD翻紅)")
@@ -230,8 +232,11 @@ with tab_radar:
                         symbol = raw_sym
                         
                     try:
+                        # 💡 修復 3：雷達版同步延長抓取區間並加入 ffill() 防呆機制
                         df_r = yf.download(symbol, period="1y", interval="1d", progress=False)
                         if not df_r.empty:
+                            df_r = df_r.ffill()
+                            
                             c_series = df_r['Close'].iloc[:, 0] if isinstance(df_r['Close'], pd.DataFrame) else df_r['Close']
                             v_series = df_r['Volume'].iloc[:, 0] if isinstance(df_r['Volume'], pd.DataFrame) else df_r['Volume']
                             
@@ -250,7 +255,6 @@ with tab_radar:
                             is_macd_bull = (macd_h > 0)
                             is_vol_surge = (cur_vol_r > vol_5ma_r)
                             
-                            # 訊號分級 (移除大盤干擾)
                             if bias_60_r <= -15.0:
                                 eval_res = "🛑 絕對不能買" if (is_down or not is_macd_bull) else "🌟 分批低接"
                             elif bias_60_r >= 15.0:
@@ -267,7 +271,6 @@ with tab_radar:
                             else:
                                 eval_res = "⏳ 觀望打底"
 
-                            # 短線動能判斷
                             if is_vol_surge and is_macd_bull:
                                 short_term_signal = "⚡ 出量點火"
                             elif is_vol_surge and not is_macd_bull:
@@ -291,7 +294,6 @@ with tab_radar:
                     if short_term_filter:
                         df_results = df_results[df_results["短線動能"] == "⚡ 出量點火"]
                         
-                    # 高價優先排序
                     df_results = df_results.sort_values(by="最新價", ascending=False)
                     
                     st.dataframe(df_results, use_container_width=True, hide_index=True)
