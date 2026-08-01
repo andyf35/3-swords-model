@@ -3,8 +3,8 @@ import yfinance as yf
 import pandas as pd
 
 # 1. 網頁基本設定 
-st.set_page_config(page_title="三刀流全能戰情室 ", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室 ")
+st.set_page_config(page_title="三刀流全能戰情室 (專注個股版)", page_icon="⚔️", layout="centered")
+st.title("⚔️ 全能操盤戰情室 (專注個股版)")
 
 # 2. 建立雙分頁架構
 tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自訂選股雷達"])
@@ -26,10 +26,10 @@ with tab_single:
 
     @st.cache_data(ttl=300)
     def get_single_data(symbol):
-        # 抓取 2 年資料確保 240MA 可以順利計算
+        # 抓取 2 年資料確保 240MA 可以順利計算，並使用 ffill 填補空值防呆
         data = yf.download(symbol, period="2y", interval="1d", progress=False)
         if not data.empty:
-            data = data.ffill() # 填補空值防呆
+            data = data.ffill() 
         return data
 
     df = get_single_data(stock_symbol)
@@ -38,14 +38,8 @@ with tab_single:
     ticker_obj = yf.Ticker(stock_symbol)
     try:
         pe_ratio = ticker_obj.info.get('trailingPE', 'N/A')
-        div_yield = ticker_obj.info.get('dividendYield', 'N/A')
-        if div_yield != 'N/A' and div_yield is not None:
-            div_yield = f"{div_yield * 100:.2f}%"
-        else:
-            div_yield = 'N/A'
     except Exception:
         pe_ratio = 'N/A'
-        div_yield = 'N/A'
 
     if df.empty:
         st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
@@ -98,7 +92,7 @@ with tab_single:
         is_macd_bull = (macd_hist_val > 0)
         is_vol_surge = (current_vol > vol_5ma)
         
-        # 💡 新增 240MA 長線下行趨勢確認條件
+        # 240MA 長線下行趨勢確認條件
         is_below_240ma = (current_price < ma240)
 
         # -------------------------------------------------------------
@@ -122,7 +116,6 @@ with tab_single:
             c4 = "❌ 未達標"
             c4_text = "量能平淡：當日成交量未達 5 日均量"
 
-        # 💡 新增年線檢核項目
         if is_below_240ma:
             c6 = "❌ 跌破"
             c6_text = "年線失守：股價低於 240MA，確認長線下行趨勢"
@@ -182,7 +175,6 @@ with tab_single:
                 position_advice = "💡 **建議資金配置**：暫緩加碼，等待止跌訊號"
                 color = "warning"
         elif is_downtrend:
-            # 💡 在空頭趨勢中加入 240MA 判定
             if is_below_240ma:
                 grade_title = "🛑【絕對不能買 / 下行趨勢確認】"
                 grade_desc = "全面跌破季線與年線 (240MA)，長線空頭成形，法人主力正在撤退。"
@@ -210,16 +202,33 @@ with tab_single:
 
         st.markdown("---")
 
-        # 三欄均線與基本面指標
-        col1, col2, col3, col4 = st.columns(4)
+        # -------------------------------------------------------------
+        # 📊 三欄均線與基本面指標 (五欄式防呆版)
+        # -------------------------------------------------------------
+        display_pe = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
+        
+        display_yield = "N/A"
+        try:
+            div_raw = ticker_obj.info.get('dividendYield', 'N/A')
+            if isinstance(div_raw, (int, float)):
+                if div_raw > 1:
+                    display_yield = f"{div_raw:.2f}%"
+                else:
+                    display_yield = f"{div_raw * 100:.2f}%"
+        except Exception:
+            pass
+
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.metric(label="月線 (20MA)", value=f"{ma20:.2f}")
         with col2:
             st.metric(label="季線 (60MA)", value=f"{ma60:.2f}")
         with col3:
-            st.metric(label="本益比 (PE)", value=f"{pe_ratio}")
+            st.metric(label="年線 (240MA)", value=f"{ma240:.2f}")
         with col4:
-            st.metric(label="預估殖利率", value=f"{div_yield}")
+            st.metric(label="本益比 (PE)", value=display_pe)
+        with col5:
+            st.metric(label="預估殖利率", value=display_yield)
 
         st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
         
@@ -228,7 +237,8 @@ with tab_radar:
     st.markdown("### 🔍 批次自訂選股雷達")
     st.write("輸入股票代碼（多檔用半形逗號 `,` 隔開），系統將自動化套用檢核清單與資金配置建議。")
     
-    default_tickers = "00878, 00919, 2308, 2330, 2395"
+    # 預設 10 檔核心主力名單
+    default_tickers = "2308, 2330, 1590, 2317, 2360, 2382, 2059, 3017, 2395, 1519"
     custom_input = st.text_input("📝 填寫自選股名單：", value=default_tickers)
     
     short_term_filter = st.checkbox("⚡ 開啟【短線爆發力】快篩 (嚴格篩選：出量 + MACD翻紅)")
@@ -251,7 +261,7 @@ with tab_radar:
                         symbol = raw_sym
                         
                     try:
-                        # 💡 同步將雷達版的抓取區間延長為 "2y" 以計算年線
+                        # 雷達版同步延長抓取區間並加入 ffill 防呆機制
                         df_r = yf.download(symbol, period="2y", interval="1d", progress=False)
                         if not df_r.empty:
                             df_r = df_r.ffill()
@@ -262,7 +272,7 @@ with tab_radar:
                             c_price = float(c_series.iloc[-1])
                             ma20_r = float(c_series.rolling(20).mean().iloc[-1])
                             ma60_r = float(c_series.rolling(60).mean().iloc[-1])
-                            ma240_r = float(c_series.rolling(240).mean().iloc[-1]) # 新增年線計算
+                            ma240_r = float(c_series.rolling(240).mean().iloc[-1])
                             vol_5ma_r = float(v_series.rolling(5).mean().iloc[-1])
                             cur_vol_r = float(v_series.iloc[-1])
                             
