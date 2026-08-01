@@ -92,14 +92,25 @@ with tab_single:
         c1 = "✅ 達成" if stable_above_60 else "❌ 未達標"
         c2 = "✅ 達成" if ma20 > ma60 else "❌ 未達標"
         c3 = "✅ 達成" if is_macd_bull else "❌ 未達標"
-        c4 = "✅ 達成" if is_vol_surge else "❌ 未達標"
         c5 = "✅ 達成" if bias_60 < overheat_threshold else "❌ 過熱"
+
+        # 動態判斷出量的意義 (防範空頭爆量下殺)
+        if is_vol_surge:
+            if current_price < ma60 and not is_macd_bull:
+                c4 = "❌ 危險"
+                c4_text = "爆量下殺：空頭格局下出量，慎防主力倒貨與恐慌賣壓"
+            else:
+                c4 = "✅ 達成"
+                c4_text = "出量點火：當日成交量 > 5日均量 (確認大資金剛進場)"
+        else:
+            c4 = "❌ 未達標"
+            c4_text = "量能平淡：當日成交量未達 5 日均量，缺乏推進動能"
 
         st.markdown(f"""
         > - **{c1}** ｜ **站穩防線**：連續三日站穩季線 (確保法人底盤防守)
         > - **{c2}** ｜ **多頭排列**：月線 (20MA) 大於季線 (60MA) (確認中期趨勢向上)
         > - **{c3}** ｜ **動能向上**：MACD 動能柱為紅/正數 (確保短線攻擊力道)
-        > - **{c4}** ｜ **出量點火**：當日成交量 > 5日均量 (確認大資金剛進場)
+        > - **{c4}** ｜ **{c4_text}**
         > - **{c5}** ｜ **風險控管**：乖離率未過熱 (避免追在短線高點)
         """)
 
@@ -126,19 +137,19 @@ with tab_single:
             grade_title = "⚠️【減碼 / 觀望勿追】"
             grade_desc = f"正乖離高達 {bias_60:.1f}%，短線漲幅已大，隨時有回檔風險，建議持股者分批減碼或空手觀望。"
             color = "warning"
-        elif stable_above_60 and ma20 > ma60:
+        elif current_price > ma60 and ma20 > ma60:
             if is_macd_bull and is_vol_surge:
                 grade_title = "🔥【強烈買進 / 順勢點火】"
-                grade_desc = "所有檢核條件全數通過！出量且動能強勁，極具短線波段爆發力。"
+                grade_desc = "所有條件通過！出量且動能強勁，極具短線波段爆發力。"
                 color = "success"
             elif is_macd_bull:
                 grade_title = "✅【偏多操作 / 持股續抱】"
                 grade_desc = "多頭結構穩定且動能向上，適合安穩建倉或抱緊持股。"
                 color = "success"
             else:
-                grade_title = "⏳【等待 / 量縮整理】"
-                grade_desc = "雖然趨勢偏多，但目前動能熄火或量縮，建議等待放量訊號再加碼。"
-                color = "info"
+                grade_title = "⚠️【多頭回檔 / 留意支撐】"
+                grade_desc = f"長線多頭格局不變，但短期動能轉弱。請留意下方季線防守價 {ma60:.2f} 是否有撐。"
+                color = "warning"
         elif is_downtrend:
             grade_title = "🛑【絕對不能買 / 空頭破底】"
             grade_desc = "全面跌破防守均線，法人主力正在撤退，請保留現金。"
@@ -168,7 +179,8 @@ with tab_single:
         with col3:
             st.metric(label="年線 (240MA)", value=f"{ma240:.2f}")
 
-        st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"距季線: {(current_price - ma60):.2f}")
+        # 這裡的 Delta 已改為直覺的「乖離率」
+        st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
         
 # ================= TAB 2: 自訂選股雷達 (含短線高價過濾) =================
 with tab_radar:
@@ -221,18 +233,18 @@ with tab_radar:
                             is_macd_bull = (macd_h > 0)
                             is_vol_surge = (cur_vol_r > vol_5ma_r)
                             
-                            # 套用升級版的訊號分級邏輯
+                            # 套用升級版的訊號分級邏輯 (同步更新)
                             if bias_60_r <= -15.0:
                                 eval_res = "🛑 絕對不能買" if (is_down or not is_macd_bull) else "🌟 分批低接"
                             elif bias_60_r >= 15.0:
                                 eval_res = "⚠️ 減碼/勿追"
-                            elif stable_60 and ma20_r > ma60_r:
+                            elif c_price > ma60_r and ma20_r > ma60_r:
                                 if is_macd_bull and is_vol_surge:
                                     eval_res = "🔥 強烈買進"
                                 elif is_macd_bull:
                                     eval_res = "✅ 偏多續抱"
                                 else:
-                                    eval_res = "⏳ 等待動能"
+                                    eval_res = "⚠️ 多頭回檔"
                             elif is_down:
                                 eval_res = "🛑 空頭避開"
                             else:
