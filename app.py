@@ -3,8 +3,8 @@ import yfinance as yf
 import pandas as pd
 
 # 1. 網頁基本設定 
-st.set_page_config(page_title="三刀流全能戰情室 (專注個股版)", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室 (專注個股版)")
+st.set_page_config(page_title="三刀流全能戰情室 ", page_icon="⚔️", layout="centered")
+st.title("⚔️ 全能操盤戰情室 ")
 
 # 2. 建立雙分頁架構
 tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自訂選股雷達"])
@@ -13,7 +13,7 @@ tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自�
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "00878", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "2308", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
