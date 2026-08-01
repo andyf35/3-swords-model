@@ -4,10 +4,10 @@ import pandas as pd
 
 # 1. 網頁基本設定 
 st.set_page_config(page_title="三刀流全能戰情室", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室 (智慧買進版)")
+st.title("⚔️ 全能操盤戰情室 (進階檢核版)")
 
 # 2. 建立雙分頁架構
-tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 戰略選股雷達"])
+tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自訂選股雷達"])
 
 # ================= TAB 1: 單兵深度偵蒐與決策 =================
 with tab_single:
@@ -24,9 +24,9 @@ with tab_single:
 
     st.subheader(f"當前監控標的: {stock_symbol} ({asset_type})")
 
-    @st.cache_data(ttl=1800)
+    @st.cache_data(ttl=300) # 5 分鐘快取，增加盤中靈敏度
     def get_single_data(symbol):
-        data = yf.download(symbol, period="1y", interval="1d")
+        data = yf.download(symbol, period="1y", interval="1d", progress=False)
         return data
 
     df = get_single_data(stock_symbol)
@@ -70,91 +70,92 @@ with tab_single:
         macd_hist_val = float(df['MACD_Hist'].iloc[-1])
 
         bias_60 = ((current_price - ma60) / ma60) * 100
-        is_gap_up = (current_open - yesterday_price) / yesterday_price > 0.02
         stable_above_60 = all(price > ma60 for price in last_3_closes)
 
         if asset_type == "一般個股":
             sweet_threshold = -15.0
-            stop_loss_pct = 0.97
+            overheat_threshold = 15.0
         else:
             sweet_threshold = -5.0
-            stop_loss_pct = 0.98
+            overheat_threshold = 6.0
 
         is_downtrend = (current_price < ma60 and ma20 < ma60)
-        is_macd_bearish = (macd_hist_val <= 0)
+        is_macd_bull = (macd_hist_val > 0)
+        is_vol_surge = (current_vol > vol_5ma)
 
-        # 戰術訊號判定
-        if stable_above_60 and ma20 > ma60:
-            trend = "🟢 多頭格局 (底盤穩固)"
-            if is_gap_up:
-                action_signal = "🚀【強勢買入】出現向上跳空缺口且站穩季線，主力發動攻擊！"
-                signal_color = "success"
-            elif current_vol > vol_5ma and not is_macd_bearish:
-                action_signal = "🔥【波段買入/抱牢】連續三日站穩季線、量增且 MACD 動能向上，可安心建倉。"
-                signal_color = "success"
+        # -------------------------------------------------------------
+        # 📋 【全新模組】：進場檢核清單 (Checklist)
+        # -------------------------------------------------------------
+        st.markdown("### 📋 進場檢核清單 (Checklist)")
+        st.write("各項戰術條件確認，符合項目越多，進場勝率與爆發力越高：")
+        
+        c1 = "✅ 達成" if stable_above_60 else "❌ 未達標"
+        c2 = "✅ 達成" if ma20 > ma60 else "❌ 未達標"
+        c3 = "✅ 達成" if is_macd_bull else "❌ 未達標"
+        c4 = "✅ 達成" if is_vol_surge else "❌ 未達標"
+        c5 = "✅ 達成" if bias_60 < overheat_threshold else "❌ 過熱"
+
+        st.markdown(f"""
+        > - **{c1}** ｜ **站穩防線**：連續三日站穩季線 (確保法人底盤防守)
+        > - **{c2}** ｜ **多頭排列**：月線 (20MA) 大於季線 (60MA) (確認中期趨勢向上)
+        > - **{c3}** ｜ **動能向上**：MACD 動能柱為紅/正數 (確保短線攻擊力道)
+        > - **{c4}** ｜ **出量點火**：當日成交量 > 5日均量 (確認大資金剛進場)
+        > - **{c5}** ｜ **風險控管**：乖離率未過熱 (避免追在短線高點)
+        """)
+
+        # -------------------------------------------------------------
+        # ⚖️ 【升級模組】：買賣訊號分級 (Signal Grading)
+        # -------------------------------------------------------------
+        st.markdown("### ⚖️ 綜合決策與訊號分級")
+        
+        grade_title = ""
+        grade_desc = ""
+        color = "info"
+
+        # 決策樹邏輯：優先判斷極端風險，再判斷買點
+        if bias_60 <= sweet_threshold:
+            if is_downtrend or not is_macd_bull:
+                grade_title = "🛑【絕對不能買 / 避開陷阱】"
+                grade_desc = f"雖然負乖離達 {bias_60:.1f}%，但趨勢空頭且動能向下，嚴禁盲目接刀。"
+                color = "error"
             else:
-                action_signal = "✅【持股續抱】結構健康，多頭排列持續中。"
-                signal_color = "success"
+                grade_title = "🌟【強烈買進 / 分批低接】"
+                grade_desc = f"股價跌至黃金甜蜜點（負乖離 {bias_60:.1f}%），且籌碼結構健康，極具長線投資價值。"
+                color = "success"
+        elif bias_60 >= overheat_threshold:
+            grade_title = "⚠️【減碼 / 觀望勿追】"
+            grade_desc = f"正乖離高達 {bias_60:.1f}%，短線漲幅已大，隨時有回檔風險，建議持股者分批減碼或空手觀望。"
+            color = "warning"
+        elif stable_above_60 and ma20 > ma60:
+            if is_macd_bull and is_vol_surge:
+                grade_title = "🔥【強烈買進 / 順勢點火】"
+                grade_desc = "所有檢核條件全數通過！出量且動能強勁，極具短線波段爆發力。"
+                color = "success"
+            elif is_macd_bull:
+                grade_title = "✅【偏多操作 / 持股續抱】"
+                grade_desc = "多頭結構穩定且動能向上，適合安穩建倉或抱緊持股。"
+                color = "success"
+            else:
+                grade_title = "⏳【等待 / 量縮整理】"
+                grade_desc = "雖然趨勢偏多，但目前動能熄火或量縮，建議等待放量訊號再加碼。"
+                color = "info"
         elif is_downtrend:
-            trend = "🔴 空頭格局 (跌破防線)"
-            action_signal = "🛡️【觀望 / 賣出】已跌破季線法人防守區，請保留現金，切勿躁進。"
-            signal_color = "error"
+            grade_title = "🛑【絕對不能買 / 空頭破底】"
+            grade_desc = "全面跌破防守均線，法人主力正在撤退，請保留現金。"
+            color = "error"
         else:
-            trend = "⚪ 震盪洗盤 (打底階段)"
-            action_signal = "⏳【盤整中】多空拉鋸，耐心等候明確突破。"
-            signal_color = "warning"
+            grade_title = "⏳【觀望 / 震盪打底】"
+            grade_desc = "均線糾結或多空不明，沒有明確的進場理由，建議觀望。"
+            color = "warning"
 
-        # 顯示當前狀態與主要戰術提示
-        st.markdown(f"### 當前狀態: **{trend}**")
-        
-        if signal_color == "success":
-            st.success(action_signal)
-            suggested_stop = ma60 * stop_loss_pct
-            st.info(f"🛡️ **紀律防護網**：建議防守價位設在 **{suggested_stop:.2f}** 附近。")
-        elif signal_color == "error":
-            st.error(action_signal)
+        if color == "success":
+            st.success(f"**結論：{grade_title}**\n\n> 💡 {grade_desc}")
+        elif color == "error":
+            st.error(f"**結論：{grade_title}**\n\n> 💡 {grade_desc}")
+        elif color == "warning":
+            st.warning(f"**結論：{grade_title}**\n\n> 💡 {grade_desc}")
         else:
-            st.warning(action_signal)
-
-        # 甜甜價與風險防護鎖
-        calculated_sweet_price = ma60 * (1 + sweet_threshold / 100.0)
-        
-        if bias_60 <= sweet_threshold:
-            if is_downtrend or is_macd_bearish:
-                st.error(f"🚨 **【甜甜價陷阱警告】** 雖然負乖離達 {bias_60:.1f}%（低於甜甜價門檻 {sweet_threshold}%），但目前畫面顯示為 **「空頭格局」** 且 **「MACD 空方動能主導」**！  \n\n> 🛑 **專家強烈不建議購買**：此為弱勢跌深，極易遇到價值陷阱或繼續下殺，請緊鎖現金切勿接刀！")
-            else:
-                st.success(f"💎 **【黃金甜甜價觸發】** 負乖離達 {bias_60:.1f}% 且多頭結構與動能健康！估算甜甜價位約在 **{calculated_sweet_price:.2f}** 以下，可考慮分批佈局。")
-        elif bias_60 >= (15 if asset_type == "一般個股" else 6):
-            st.error(f"🚨 **【短線過熱警告】** 正乖離達 {bias_60:.1f}%，短線過熱，慎防回檔！")
-        else:
-            st.info(f"🎯 **甜甜價雷達監控中**：當前乖離 {bias_60:.1f}%（觸發門檻：{sweet_threshold}% / 參考價：約 {calculated_sweet_price:.2f}）")
-
-        # -------------------------------------------------------------
-        # ⚖️ 【智慧買進決策尺】直接給出能不能買的結論
-        # -------------------------------------------------------------
-        st.markdown("### ⚖️ 智慧買進決策判斷")
-        
-        if bias_60 <= sweet_threshold:
-            if is_downtrend or is_macd_bearish:
-                eval_title = "❌ 絕對不能買（陷阱價）"
-                eval_desc = f"雖然價格跌深（負乖離 {bias_60:.1f}%），但趨勢仍在空頭且動能向下，屬於無支撐的弱勢下殺。"
-                st.error(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
-            else:
-                eval_title = "💎 可以買（黃金甜甜價）"
-                eval_desc = f"價格已跌至超跌甜蜜點（負乖離 {bias_60:.1f}%），且多頭結構與 MACD 動能健康，適合分批低接。"
-                st.success(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
-        elif bias_60 >= (15 if asset_type == "一般個股" else 6):
-            eval_title = "⚠️ 不建議追高（過熱價）"
-            eval_desc = f"正乖離高達 {bias_60:.1f}%，短線漲幅過大，此時進場追高容易套在短天期高點。"
-            st.error(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
-        elif stable_above_60 and ma20 > ma60 and not is_macd_bearish:
-            eval_title = "✅ 可以買（右側順勢價）"
-            eval_desc = f"均線多頭排列且連續三日站穩季線、動能向上，屬於健康的順勢攻擊買點。"
-            st.success(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
-        else:
-            eval_title = "⏳ 建議觀望（盤整無力價）"
-            eval_desc = f"目前多空拉鋸或均線糾結（乖離 {bias_60:.1f}%），缺乏明確方向，建議把現金留在手邊。"
-            st.warning(f"**結論：{eval_title}**\n\n> 💡 {eval_desc}")
+            st.info(f"**結論：{grade_title}**\n\n> 💡 {grade_desc}")
 
         st.markdown("---")
 
@@ -169,78 +170,106 @@ with tab_single:
 
         st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"距季線: {(current_price - ma60):.2f}")
         
-        macd_status = "🟢 多方動能增強" if not is_macd_bearish else "🔴 空方動能主導"
-        st.markdown(f"""
-        > 📊 **多維度底層數據**  
-        > • 三日站穩季線: **{'✅ 達標' if stable_above_60 else '❌ 未達標'}**  
-        > • MACD 動能柱: **{macd_status}**  
-        > • 資產專屬甜甜價參考線: **{calculated_sweet_price:.2f}**
-        """)
-
-# ================= TAB 2: 戰略選股雷達 =================
+# ================= TAB 2: 自訂選股雷達 (含短線高價過濾) =================
 with tab_radar:
-    st.markdown("### 🔍 專家嚴選：十大高階智造與 AI 股雷達")
-    st.write("點擊下方按鈕，系統將自動掃描 10 檔口袋名單，直接幫你過濾出今天「可以買」的標的。")
+    st.markdown("### 🔍 批次自訂選股雷達")
+    st.write("輸入股票代碼（多檔用半形逗號 `,` 隔開），系統將自動化套用檢核清單與訊號分級。")
     
-    watch_list = {
-        "2308.TW": "台達電",
-        "2330.TW": "台積電",
-        "1590.TW": "亞德客-KY",
-        "2317.TW": "鴻海",
-        "2360.TW": "致茂",
-        "2382.TW": "廣達",
-        "2059.TW": "川湖",
-        "3017.TW": "奇鋐",
-        "2395.TW": "研華",
-        "1519.TW": "華城"
-    }
+    default_tickers = "2308, 2330, 2059, 2395, 2002"
+    custom_input = st.text_input("📝 填寫自選股名單：", value=default_tickers)
     
-    if st.button("🚀 啟動 10 檔智慧買進掃描"):
-        with st.spinner('雷達掃描中，請稍候...'):
-            results = []
-            for symbol, name in watch_list.items():
-                try:
-                    df_r = yf.download(symbol, period="1y", interval="1d", progress=False)
-                    if not df_r.empty:
-                        c_series = df_r['Close'].iloc[:, 0] if isinstance(df_r['Close'], pd.DataFrame) else df_r['Close']
-                        v_series = df_r['Volume'].iloc[:, 0] if isinstance(df_r['Volume'], pd.DataFrame) else df_r['Volume']
+    short_term_filter = st.checkbox("⚡ 開啟【短線爆發力】快篩 (嚴格篩選：出量 + MACD翻紅)")
+
+    if st.button("🚀 啟動自選雷達掃描"):
+        if not custom_input.strip():
+            st.warning("⚠️ 請先輸入至少一檔股票代碼！")
+        else:
+            with st.spinner('機台運轉與數據掃描中，請稍候...'):
+                results = []
+                raw_symbols = [s.strip() for s in custom_input.split(',')]
+                
+                for raw_sym in raw_symbols:
+                    if not raw_sym: 
+                        continue
                         
-                        c_price = float(c_series.iloc[-1])
-                        ma20_r = float(c_series.rolling(20).mean().iloc[-1])
-                        ma60_r = float(c_series.rolling(60).mean().iloc[-1])
-                        vol_5ma_r = float(v_series.rolling(5).mean().iloc[-1])
-                        cur_vol_r = float(v_series.iloc[-1])
+                    if not raw_sym.endswith(".TW") and not raw_sym.endswith(".TWO"):
+                        symbol = f"{raw_sym}.TW"
+                    else:
+                        symbol = raw_sym
                         
-                        exp12_r = c_series.ewm(span=12, adjust=False).mean()
-                        exp26_r = c_series.ewm(span=26, adjust=False).mean()
-                        macd_h = (exp12_r - exp26_r - (exp12_r - exp26_r).ewm(span=9, adjust=False).mean()).iloc[-1]
-                        
-                        last_3 = c_series.iloc[-3:].tolist()
-                        stable_60 = all(p > ma60_r for p in last_3)
-                        bias_60_r = ((c_price - ma60_r) / ma60_r) * 100
-                        
-                        is_down = (c_price < ma60_r and ma20_r < ma60_r)
-                        is_macd_bear = (macd_h <= 0)
-                        
-                        if bias_60_r <= -15.0:
-                            eval_res = "❌ 陷阱價(不能買)" if (is_down or is_macd_bear) else "💎 甜甜價(可以買)"
-                        elif bias_60_r >= 15.0:
-                            eval_res = "⚠️ 過熱價(不要追)"
-                        elif stable_60 and ma20_r > ma60_r and not is_macd_bear:
-                            eval_res = "✅ 順勢價(可以買)"
-                        else:
-                            eval_res = "⏳ 盤整中(先觀望)"
+                    try:
+                        df_r = yf.download(symbol, period="1y", interval="1d", progress=False)
+                        if not df_r.empty:
+                            c_series = df_r['Close'].iloc[:, 0] if isinstance(df_r['Close'], pd.DataFrame) else df_r['Close']
+                            v_series = df_r['Volume'].iloc[:, 0] if isinstance(df_r['Volume'], pd.DataFrame) else df_r['Volume']
                             
-                        results.append({
-                            "代碼": symbol.replace(".TW", ""),
-                            "名稱": name,
-                            "最新價": round(c_price, 2),
-                            "乖離率(%)": round(bias_60_r, 2),
-                            "買進決策": eval_res
-                        })
-                except Exception:
-                    pass
-            
-            if results:
-                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                st.success("✅ 掃描完成！請優先鎖定標註「可以買」的精選標的。")
+                            c_price = float(c_series.iloc[-1])
+                            ma20_r = float(c_series.rolling(20).mean().iloc[-1])
+                            ma60_r = float(c_series.rolling(60).mean().iloc[-1])
+                            vol_5ma_r = float(v_series.rolling(5).mean().iloc[-1])
+                            cur_vol_r = float(v_series.iloc[-1])
+                            
+                            exp12_r = c_series.ewm(span=12, adjust=False).mean()
+                            exp26_r = c_series.ewm(span=26, adjust=False).mean()
+                            macd_h = (exp12_r - exp26_r - (exp12_r - exp26_r).ewm(span=9, adjust=False).mean()).iloc[-1]
+                            
+                            last_3 = c_series.iloc[-3:].tolist()
+                            stable_60 = all(p > ma60_r for p in last_3)
+                            bias_60_r = ((c_price - ma60_r) / ma60_r) * 100
+                            
+                            is_down = (c_price < ma60_r and ma20_r < ma60_r)
+                            is_macd_bull = (macd_h > 0)
+                            is_vol_surge = (cur_vol_r > vol_5ma_r)
+                            
+                            # 套用升級版的訊號分級邏輯
+                            if bias_60_r <= -15.0:
+                                eval_res = "🛑 絕對不能買" if (is_down or not is_macd_bull) else "🌟 分批低接"
+                            elif bias_60_r >= 15.0:
+                                eval_res = "⚠️ 減碼/勿追"
+                            elif stable_60 and ma20_r > ma60_r:
+                                if is_macd_bull and is_vol_surge:
+                                    eval_res = "🔥 強烈買進"
+                                elif is_macd_bull:
+                                    eval_res = "✅ 偏多續抱"
+                                else:
+                                    eval_res = "⏳ 等待動能"
+                            elif is_down:
+                                eval_res = "🛑 空頭避開"
+                            else:
+                                eval_res = "⏳ 觀望打底"
+
+                            # 短線動能判斷 (出量點火 + 動能向上)
+                            if is_vol_surge and is_macd_bull:
+                                short_term_signal = "⚡ 出量點火"
+                            elif is_vol_surge and not is_macd_bull:
+                                short_term_signal = "📉 爆量下殺"
+                            else:
+                                short_term_signal = "💤 量縮整理"
+                                
+                            results.append({
+                                "代碼": raw_sym,
+                                "最新價": round(c_price, 2),
+                                "乖離率(%)": round(bias_60_r, 2),
+                                "綜合訊號": eval_res,
+                                "短線動能": short_term_signal
+                            })
+                    except Exception:
+                        pass
+                
+                if results:
+                    df_results = pd.DataFrame(results)
+                    
+                    if short_term_filter:
+                        df_results = df_results[df_results["短線動能"] == "⚡ 出量點火"]
+                        
+                    # 高價優先：系統自動將股票依照「最新價」從高到低排序
+                    df_results = df_results.sort_values(by="最新價", ascending=False)
+                    
+                    st.dataframe(df_results, use_container_width=True, hide_index=True)
+                    
+                    if short_term_filter and df_results.empty:
+                        st.warning("👀 掃描名單中，今日無「出量點火」之高價股。建議保留資金，耐心等待。")
+                    elif short_term_filter:
+                        st.success("🎯 篩選成功！清單已依照股價由高至低排列，優先顯示流動性與震幅空間最佳的高價股。")
+                    else:
+                        st.success("✅ 掃描完成！請參考『綜合訊號』與『短線動能』規劃進出場點。")
