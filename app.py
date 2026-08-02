@@ -232,36 +232,62 @@ with tab_single:
 
         st.metric(label="最新日收盤價", value=f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
         
-# ================= TAB 2: 自訂選股雷達 =================
+# ================= TAB 2: 自動化戰略選股雷達 (免手動打代碼) =================
 with tab_radar:
-    st.markdown("### 🔍 批次自訂選股雷達")
-    st.write("輸入股票代碼（多檔用半形逗號 `,` 隔開），系統將自動化套用檢核清單與資金配置建議。")
+    st.markdown("### 🔍 自動化選股與戰略池雷達")
+    st.write("勾選你想掃描的戰鬥群，系統將自動化套用檢核清單，直接幫你篩出目前最值得注意的【推薦標的】。")
     
-    # 預設 10 檔核心主力名單
-    default_tickers = "2308, 2330, 1590, 2317, 2360, 2382, 2059, 3017, 2395, 1519"
-    custom_input = st.text_input("📝 填寫自選股名單：", value=default_tickers)
-    
-    short_term_filter = st.checkbox("⚡ 開啟【短線爆發力】快篩 (嚴格篩選：出量 + MACD翻紅)")
+    # 💡 1. 免打字！直接選用定義好的戰鬥群池
+    col_pool1, col_pool2, col_pool3 = st.columns(3)
+    with col_pool1:
+        pool_tech = st.checkbox("🔥 AI 與高階智造核心 (預設)", value=True)
+    with col_pool2:
+        pool_top20 = st.checkbox("👑 台股大型權值王大隊", value=False)
+    with col_pool3:
+        pool_etf = st.checkbox("🛡️ 高股息與大型 ETF", value=False)
 
-    if st.button("🚀 啟動自選雷達掃描"):
-        if not custom_input.strip():
-            st.warning("⚠️ 請先輸入至少一檔股票代碼！")
+    # 預設各個戰鬥群的代碼清單
+    list_tech = ["2308", "2330", "1590", "2317", "2360", "2382", "2059", "3017", "2395", "1519"]
+    list_top20 = ["2454", "2303", "2881", "2882", "1301", "1303", "2002", "3008", "2891", "2886", "3711", "2357"]
+    list_etf = ["0050", "006208", "00878", "00919", "0056", "00713", "00929"]
+
+    # 自動合併勾選的股票代碼 (去重)
+    target_symbols = []
+    if pool_tech: target_symbols.extend(list_tech)
+    if pool_top20: target_symbols.extend(list_top20)
+    if pool_etf: target_symbols.extend(list_etf)
+    target_symbols = list(set(target_symbols))
+
+    # 保留手動擴充功能，方便臨時加看
+    with st.expander("➕ 想要臨時另外手動加看其他股票嗎？(點此展開)"):
+        custom_add = st.text_input("輸入要額外加入的代碼 (用半形逗號隔開)：", value="")
+        if custom_add.strip():
+            extra = [s.strip() for s in custom_add.split(',') if s.strip()]
+            target_symbols.extend(extra)
+            target_symbols = list(set(target_symbols))
+
+    st.markdown("---")
+    
+    # 💡 2. 嚴格推薦篩選模式
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        only_recommend = st.checkbox("🌟 【僅顯示進攻與推薦標的】 (自動隱藏絕對不能買/空頭破底)", value=False)
+    with col_f2:
+        short_term_filter = st.checkbox("⚡ 開啟【短線爆發力】快篩 (嚴格篩選：出量 + MACD翻紅)", value=False)
+
+    st.write(f"目前共鎖定 **{len(target_symbols)}** 檔標的待掃描...")
+
+    if st.button("🚀 啟動自動化推薦雷達"):
+        if not target_symbols:
+            st.warning("⚠️ 請至少勾選上方一個戰鬥群池！")
         else:
-            with st.spinner('機台運轉與數據掃描中，請稍候...'):
+            with st.spinner('雷達全速運轉與均線掃描中，請稍候...'):
                 results = []
-                raw_symbols = [s.strip() for s in custom_input.split(',')]
-                
-                for raw_sym in raw_symbols:
-                    if not raw_sym: 
-                        continue
-                        
-                    if not raw_sym.endswith(".TW") and not raw_sym.endswith(".TWO"):
-                        symbol = f"{raw_sym}.TW"
-                    else:
-                        symbol = raw_sym
+                for raw_sym in target_symbols:
+                    if not raw_sym: continue
+                    symbol = f"{raw_sym}.TW" if not (raw_sym.endswith(".TW") or raw_sym.endswith(".TWO")) else raw_sym
                         
                     try:
-                        # 雷達版同步延長抓取區間並加入 ffill 防呆機制
                         df_r = yf.download(symbol, period="2y", interval="1d", progress=False)
                         if not df_r.empty:
                             df_r = df_r.ffill()
@@ -286,7 +312,7 @@ with tab_radar:
                             is_vol_surge = (cur_vol_r > vol_5ma_r)
                             is_below_240_r = (c_price < ma240_r)
                             
-                            # 訊號分級 (結合年線防護)
+                            # 訊號分級
                             if bias_60_r <= -15.0:
                                 eval_res = "🛑 絕對不能買" if (is_down or not is_macd_bull) else "🌟 分批低接"
                             elif bias_60_r >= 15.0:
@@ -323,16 +349,19 @@ with tab_radar:
                 if results:
                     df_results = pd.DataFrame(results)
                     
+                    # 💡 自動過濾：如果勾選「僅顯示進攻與推薦」，自動把空頭跟危險標的切除
+                    if only_recommend:
+                        df_results = df_results[df_results["綜合訊號"].isin(["🔥 強烈買進", "🌟 分批低接", "✅ 偏多續抱", "⚠️ 多頭回檔"])]
+                    
                     if short_term_filter:
                         df_results = df_results[df_results["短線動能"] == "⚡ 出量點火"]
                         
+                    # 按照最新價由高至低排列
                     df_results = df_results.sort_values(by="最新價", ascending=False)
                     
                     st.dataframe(df_results, use_container_width=True, hide_index=True)
                     
-                    if short_term_filter and df_results.empty:
-                        st.warning("👀 掃描名單中，今日無「出量點火」之高價股。建議保留資金，耐心等待。")
-                    elif short_term_filter:
-                        st.success("🎯 篩選成功！清單已依照股價由高至低排列。")
+                    if df_results.empty:
+                        st.warning("👀 今日選定池中，未有符合你進階嚴格條件的標的，建議保留資金，紀律觀望。")
                     else:
-                        st.success("✅ 掃描完成！直接依據個股技術分級做決策。")
+                        st.success(f"🎯 自動掃描完成！共為你列出 **{len(df_results)}** 檔當前核心動態名單。")
