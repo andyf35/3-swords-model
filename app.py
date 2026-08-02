@@ -240,21 +240,31 @@ with tab_radar:
     # 💡 1. 免打字！直接選用定義好的戰鬥群池
     col_pool1, col_pool2, col_pool3 = st.columns(3)
     with col_pool1:
-        pool_tech = st.checkbox("🔥 AI 與高階智造核心 (預設)", value=True)
+        pool_tech = st.checkbox("🔥 AI 與高階智造核心 (10檔)", value=True)
     with col_pool2:
-        pool_top20 = st.checkbox("👑 台股大型權值王大隊", value=False)
+        pool_tw50 = st.checkbox("👑 台灣 50 權值大隊 (完整50檔)", value=False)
     with col_pool3:
-        pool_etf = st.checkbox("🛡️ 高股息與大型 ETF", value=False)
+        pool_etf = st.checkbox("🛡️ 高股息與大型 ETF (10檔)", value=False)
 
-    # 預設各個戰鬥群的代碼清單
+    # 1. AI 與高階智造核心 (10檔)
     list_tech = ["2308", "2330", "1590", "2317", "2360", "2382", "2059", "3017", "2395", "1519"]
-    list_top20 = ["2454", "2303", "2881", "2882", "1301", "1303", "2002", "3008", "2891", "2886", "3711", "2357"]
-    list_etf = ["0050", "006208", "00878", "00919", "0056", "00713", "00929"]
+    
+    # 2. 台灣 50 完整權值股大隊 (真正名副其實的 50 檔巨頭)
+    list_tw50 = [
+        "2330", "2317", "2454", "2308", "2382", "2881", "2882", "2303", "3711", "2891",
+        "2886", "1301", "1303", "2002", "1216", "2884", "2885", "3008", "2357", "2892",
+        "5880", "2880", "2883", "2887", "1101", "3034", "2327", "4904", "1326", "2912",
+        "2890", "5871", "1590", "3037", "2395", "2379", "3231", "6669", "2345", "1402",
+        "2408", "2801", "6505", "1102", "3045", "2301", "9910", "3661", "2603", "2609"
+    ]
+    
+    # 3. 高股息與大型主動 ETF (10檔)
+    list_etf = ["0050", "006208", "00878", "00919", "0056", "00713", "00929", "00940", "0051", "00733"]
 
-    # 自動合併勾選的股票代碼 (去重)
+    # 自動合併勾選的股票代碼 (自動移除重複代碼)
     target_symbols = []
     if pool_tech: target_symbols.extend(list_tech)
-    if pool_top20: target_symbols.extend(list_top20)
+    if pool_tw50: target_symbols.extend(list_tw50)
     if pool_etf: target_symbols.extend(list_etf)
     target_symbols = list(set(target_symbols))
 
