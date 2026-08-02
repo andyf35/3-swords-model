@@ -3,8 +3,8 @@ import yfinance as yf
 import pandas as pd
 
 # 1. 網頁基本設定 
-st.set_page_config(page_title="三刀流全能戰情室 (專注個股版)", page_icon="⚔️", layout="centered")
-st.title("⚔️ 全能操盤戰情室 (專注個股版)")
+st.set_page_config(page_title="三刀流全能戰情室 (測試版)", page_icon="⚔️", layout="centered")
+st.title("⚔️ 全能操盤戰情室 (測試版)")
 
 # 2. 建立雙分頁架構
 tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自訂選股雷達"])
