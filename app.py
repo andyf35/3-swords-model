@@ -49,6 +49,13 @@ with tab_single:
 
     ticker_obj = yf.Ticker(stock_symbol)
     pe_ratio = ticker_obj.info.get('trailingPE', 'N/A')
+    
+    # 嘗試抓取殖利率 (若無則顯示 N/A)
+    try:
+        div_yield = ticker_obj.info.get('dividendYield', None)
+        div_str = f"{div_yield * 100:.2f}%" if div_yield else "N/A"
+    except:
+        div_str = "N/A"
 
     if df.empty:
         st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
@@ -68,7 +75,7 @@ with tab_single:
         macd = c_series.ewm(span=12, adjust=False).mean() - c_series.ewm(span=26, adjust=False).mean()
         df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
-        # 🆕 ATR (平均真實區間) 計算
+        # ATR 計算
         df['Prev_Close'] = c_series.shift(1)
         tr1 = h_series - l_series
         tr2 = (h_series - df['Prev_Close']).abs()
@@ -162,9 +169,6 @@ with tab_single:
             if color == "success":
                 entry_high = current_price
                 entry_low = max(ma20, ma60) 
-                
-                # 採用季線 (60MA) 向下緩衝 1.5 倍 ATR 作為動態停損
-                # 這能確保停損點完美避開該股近期的日常洗盤震幅
                 stop_loss = ma60 - (current_atr * 1.5) 
                 
                 risk_per_share = current_price - stop_loss
@@ -184,13 +188,21 @@ with tab_single:
                 if risk_per_1000 > 10000:
                     st.warning("⚠️ 系統警示：由於該股近期波動率(ATR)過大或離季線較遠，單筆停損金額破萬。建議改買零股或等回檔縮小風險距離。")
 
+        # -------------------------------------------------------------
+        # 📊 底部數據面板 (改為上下兩行，確保所有指標完美呈現不擠壓)
+        # -------------------------------------------------------------
         st.markdown("---")
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("月線 (20MA)", f"{ma20:.2f}")
-        col2.metric("季線 (60MA)", f"{ma60:.2f}")
-        col3.metric("真實波動 (ATR)", f"{current_atr:.2f}")
-        col4.metric("本益比 (PE)", f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A")
-        col5.metric("最新日收盤價", f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
+        st.markdown("### 📊 關鍵指標總覽")
+        row1_c1, row1_c2, row1_c3, row1_c4 = st.columns(4)
+        row1_c1.metric("月線 (20MA)", f"{ma20:.2f}")
+        row1_c2.metric("季線 (60MA)", f"{ma60:.2f}")
+        row1_c3.metric("年線 (240MA)", f"{ma240:.2f}")
+        row1_c4.metric("真實波動 (ATR)", f"{current_atr:.2f}")
+
+        row2_c1, row2_c2, row2_c3 = st.columns(3)
+        row2_c1.metric("本益比 (PE)", f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A")
+        row2_c2.metric("預估殖利率", div_str)
+        row2_c3.metric("最新日收盤價", f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
 
 # ================= TAB 2: 自動化戰略選股雷達 =================
 with tab_radar:
