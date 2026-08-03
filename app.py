@@ -3,11 +3,11 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 
-# 1. 網頁基本設定 (改為寬螢幕以利圖表顯示)
+# 1. 網頁基本設定 (寬螢幕)
 st.set_page_config(page_title="三刀流全能戰情室 (專業旗艦版)", page_icon="⚔️", layout="wide")
 st.title("⚔️ 全能操盤戰情室 (專業旗艦版)")
 
-# ================= 🆕 升級功能一：大盤環境紅綠燈 =================
+# ================= 🚦 大盤環境紅綠燈 =================
 @st.cache_data(ttl=300)
 def get_market_trend():
     try:
@@ -53,7 +53,7 @@ with tab_single:
     if df.empty:
         st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
     else:
-        # 資料處理 (加入 High, Low 供畫圖使用)
+        # 資料處理
         c_series = df['Close'].iloc[:, 0] if isinstance(df['Close'], pd.DataFrame) else df['Close']
         v_series = df['Volume'].iloc[:, 0] if isinstance(df['Volume'], pd.DataFrame) else df['Volume']
         o_series = df['Open'].iloc[:, 0] if isinstance(df['Open'], pd.DataFrame) else df['Open']
@@ -68,12 +68,21 @@ with tab_single:
         macd = c_series.ewm(span=12, adjust=False).mean() - c_series.ewm(span=26, adjust=False).mean()
         df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
+        # 🆕 ATR (平均真實區間) 計算
+        df['Prev_Close'] = c_series.shift(1)
+        tr1 = h_series - l_series
+        tr2 = (h_series - df['Prev_Close']).abs()
+        tr3 = (l_series - df['Prev_Close']).abs()
+        df['TR'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        df['ATR_14'] = df['TR'].rolling(window=14).mean()
+
         last_3_closes = c_series.iloc[-3:].tolist()
         current_price = float(last_3_closes[-1])
         
         ma20, ma60, ma240 = float(df['月線_20MA'].iloc[-1]), float(df['季線_60MA'].iloc[-1]), float(df['年線_240MA'].iloc[-1])
         current_vol, vol_5ma = float(v_series.iloc[-1]), float(df['Volume_5MA'].iloc[-1])
         macd_hist_val = float(df['MACD_Hist'].iloc[-1])
+        current_atr = float(df['ATR_14'].iloc[-1])
 
         bias_60 = ((current_price - ma60) / ma60) * 100
         stable_above_60 = all(price > ma60 for price in last_3_closes)
@@ -86,10 +95,10 @@ with tab_single:
         is_below_240ma = (current_price < ma240)
 
         # -------------------------------------------------------------
-        # 🆕 升級功能二：視覺化動態 K 線與均線圖表
+        # 📈 視覺化動態 K 線與均線圖表
         # -------------------------------------------------------------
         st.markdown("### 📈 戰情動態走勢圖 (近半年)")
-        df_plot = df.iloc[-120:].copy() # 取近半年畫圖
+        df_plot = df.iloc[-120:].copy() 
         fig = go.Figure(data=[go.Candlestick(x=df_plot.index, open=o_series.iloc[-120:], high=h_series.iloc[-120:], low=l_series.iloc[-120:], close=c_series.iloc[-120:], name="日K線")])
         fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['月線_20MA'], name='月線 (20MA)', line=dict(color='blue', width=1.5)))
         fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['季線_60MA'], name='季線 (60MA - 生命線)', line=dict(color='orange', width=2)))
@@ -142,29 +151,44 @@ with tab_single:
             else:
                 grade_title, grade_desc, color = "⏳【觀望 / 震盪打底】", "缺乏明確進場理由，等待突破。", "info"
 
-            # 顯示決策
             if color == "success": st.success(f"**{grade_title}**\n\n{grade_desc}")
             elif color == "error": st.error(f"**{grade_title}**\n\n{grade_desc}")
             elif color == "warning": st.warning(f"**{grade_title}**\n\n{grade_desc}")
             else: st.info(f"**{grade_title}**\n\n{grade_desc}")
 
             # -------------------------------------------------------------
-            # 🆕 升級功能三：精確停損價與預期風險試算
+            # 🛡️ 專業 ATR 動態風控與點位推演
             # -------------------------------------------------------------
             if color == "success":
-                stop_loss = ma60 * 0.99 # 預設季線下方 1% 作為鐵壁停損點
-                risk_per_1000 = max(0, (current_price - stop_loss) * 1000)
+                entry_high = current_price
+                entry_low = max(ma20, ma60) 
+                
+                # 採用季線 (60MA) 向下緩衝 1.5 倍 ATR 作為動態停損
+                # 這能確保停損點完美避開該股近期的日常洗盤震幅
+                stop_loss = ma60 - (current_atr * 1.5) 
+                
+                risk_per_share = current_price - stop_loss
+                risk_per_1000 = max(0, risk_per_share * 1000)
+                
+                target_price = current_price + (risk_per_share * 2)
+                reward_per_1000 = (target_price - current_price) * 1000
+
+                st.markdown("### 🛡️ 專業風控推演 (買進 1 張試算)")
                 st.markdown(f"""
-                🛡️ **風控沙盤推演 (買進 1 張 / 1000 股)**：
-                * 建議防守底線 (停損價)：**{stop_loss:.1f}** 元 (季線下方 1%)
-                * 單筆最大風險預估：約 **-NT$ {risk_per_1000:,.0f}**
+                * 🎯 **最佳進場區間**：**{entry_low:.1f} ~ {entry_high:.1f}** 元 (收盤價與月線之間分批低接)
+                * 🛑 **ATR 防守底線**：**{stop_loss:.1f}** 元 (季線向下緩衝 1.5 倍 ATR `{current_atr:.1f}`)
+                * 🩸 **單筆最大風險**：若跌破停損，預估虧損 **-NT$ {risk_per_1000:,.0f}**
+                * 🏆 **合理停利目標**：**{target_price:.1f}** 元以上 (盈虧比 1:2，預估獲利 **+NT$ {reward_per_1000:,.0f}**)
                 """)
+                
+                if risk_per_1000 > 10000:
+                    st.warning("⚠️ 系統警示：由於該股近期波動率(ATR)過大或離季線較遠，單筆停損金額破萬。建議改買零股或等回檔縮小風險距離。")
 
         st.markdown("---")
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("月線 (20MA)", f"{ma20:.2f}")
         col2.metric("季線 (60MA)", f"{ma60:.2f}")
-        col3.metric("年線 (240MA)", f"{ma240:.2f}")
+        col3.metric("真實波動 (ATR)", f"{current_atr:.2f}")
         col4.metric("本益比 (PE)", f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A")
         col5.metric("最新日收盤價", f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
 
@@ -211,9 +235,7 @@ with tab_radar:
                         m20 = float(c_s.rolling(20).mean().iloc[-1])
                         v5 = float(v_s.rolling(5).mean().iloc[-1])
                         
-                        # -------------------------------------------------------------
-                        # 🆕 升級功能四：流動性濾網 (日均成交額 < 1 億過濾)
-                        # -------------------------------------------------------------
+                        # 💧 流動性濾網 (日均成交額 > 1 億)
                         daily_turnover = cp * cv
                         is_liquid = daily_turnover >= 100_000_000
 
