@@ -12,20 +12,25 @@ st.title("⚔️ 全能操盤戰情室 (雲端抗封鎖旗艦版)")
 @st.cache_data(ttl=300)
 def get_market_trend():
     try:
-        twii = yf.download("^TWII", period="6mo", interval="1d", progress=False).ffill()
-        if twii.empty: return 0, 0, True
-        close_s = twii['Close'].iloc[:, 0] if isinstance(twii['Close'], pd.DataFrame) else twii['Close']
-        ma60 = float(close_s.rolling(60).mean().iloc[-1])
-        cp = float(close_s.iloc[-1])
+        # 修正：改用 history() 抓取，並加入 0050 雙重保險
+        tkr = yf.Ticker("^TWII")
+        hist = tkr.history(period="6mo")
+        if hist.empty:
+            tkr_backup = yf.Ticker("0050.TW")
+            hist = tkr_backup.history(period="6mo")
+            if hist.empty: return 0, 0, True
+            
+        ma60 = float(hist['Close'].rolling(60).mean().iloc[-1])
+        cp = float(hist['Close'].iloc[-1])
         return cp, ma60, cp > ma60
     except:
         return 0, 0, True 
 
 market_cp, market_ma60, is_market_bull = get_market_trend()
 if is_market_bull:
-    st.success(f"🚦 **大盤環境：🟢 綠燈通行** (加權指數 {market_cp:.0f} 站穩季線 {market_ma60:.0f}，順勢波段操作，可動用標準資金)")
+    st.success(f"🚦 **大盤環境：🟢 綠燈通行** (大盤指數 {market_cp:.0f} 站穩季線 {market_ma60:.0f}，順勢波段操作，可動用標準資金)")
 else:
-    st.error(f"🚦 **大盤環境：🔴 紅燈警戒** (加權指數 {market_cp:.0f} 跌破季線 {market_ma60:.0f}，系統性風險升高，強制減碼或觀望)")
+    st.error(f"🚦 **大盤環境：🔴 紅燈警戒** (大盤指數 {market_cp:.0f} 跌破季線 {market_ma60:.0f}，系統性風險升高，強制減碼或觀望)")
 st.markdown("---")
 
 # 2. 建立雙分頁架構
@@ -35,7 +40,7 @@ tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自�
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "2308", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "2330", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
@@ -48,17 +53,6 @@ with tab_single:
         return data.ffill() if not data.empty else data
 
     df = get_single_data(stock_symbol)
-
-    # 安全抓取本益比與殖利率，略過防禦限制
-    pe_ratio, div_str = 'N/A', 'N/A'
-    try:
-        ticker_obj = yf.Ticker(stock_symbol)
-        info = ticker_obj.info
-        pe_ratio = info.get('trailingPE', 'N/A')
-        div_yield = info.get('dividendYield', None)
-        if div_yield: div_str = f"{div_yield * 100:.2f}%"
-    except:
-        pass
 
     if df.empty:
         st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
@@ -77,6 +71,7 @@ with tab_single:
         macd = c_series.ewm(span=12, adjust=False).mean() - c_series.ewm(span=26, adjust=False).mean()
         df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
+        # ATR 計算
         df['Prev_Close'] = c_series.shift(1)
         tr1 = h_series - l_series
         tr2 = (h_series - df['Prev_Close']).abs()
@@ -84,13 +79,22 @@ with tab_single:
         df['TR'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR_14'] = df['TR'].rolling(window=14).mean()
 
+        # RSI 計算 (取代失效的基本面資料)
+        delta = c_series.diff()
+        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI_14'] = 100 - (100 / (1 + rs))
+
         last_3_closes = c_series.iloc[-3:].tolist()
         current_price = float(last_3_closes[-1])
         
         ma20, ma60, ma240 = float(df['月線_20MA'].iloc[-1]), float(df['季線_60MA'].iloc[-1]), float(df['年線_240MA'].iloc[-1])
-        current_vol, vol_5ma = float(v_series.iloc[-1]), float(df['Volume_5MA'].iloc[-1])
+        current_vol = float(v_series.iloc[-1])
+        vol_5ma = float(df['Volume_5MA'].iloc[-1])
         macd_hist_val = float(df['MACD_Hist'].iloc[-1])
         current_atr = float(df['ATR_14'].iloc[-1])
+        current_rsi = float(df['RSI_14'].iloc[-1])
 
         bias_60 = ((current_price - ma60) / ma60) * 100
         stable_above_60 = all(price > ma60 for price in last_3_closes)
@@ -178,9 +182,9 @@ with tab_single:
         row1_c4.metric("真實波動 (ATR)", f"{current_atr:.2f}")
 
         row2_c1, row2_c2, row2_c3 = st.columns(3)
-        pe_display = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
-        row2_c1.metric("本益比 (PE)", pe_display)
-        row2_c2.metric("預估殖利率", div_str)
+        # 以 RSI 和 成交量 取代失效的 PE 與殖利率
+        row2_c1.metric("RSI (14日)", f"{current_rsi:.1f}")
+        row2_c2.metric("最新單日成交量", f"{int(current_vol/1000):,} 張")
         row2_c3.metric("最新日收盤價", f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
 
 # ================= TAB 2: 自動化戰略選股雷達 (終極批次下載版) =================
@@ -214,7 +218,6 @@ with tab_radar:
             
             results = []
             if valid_symbols:
-                # 🚀 關鍵改動：一次把所有代碼丟給 Yahoo 批次下載，只敲一次門！
                 df_batch = yf.download(valid_symbols, period="1y", interval="1d", progress=False)
                 
                 for raw_sym in target_symbols:
@@ -222,7 +225,6 @@ with tab_radar:
                     sym_tw = f"{raw_sym}.TW" if not (raw_sym.endswith(".TW") or raw_sym.endswith(".TWO")) else raw_sym
                     
                     try:
-                        # 處理單檔與多檔批次下載回傳格式不同的防呆機制
                         if len(valid_symbols) == 1:
                             c_s = df_batch['Close'].iloc[:, 0] if isinstance(df_batch['Close'], pd.DataFrame) else df_batch['Close']
                             v_s = df_batch['Volume'].iloc[:, 0] if isinstance(df_batch['Volume'], pd.DataFrame) else df_batch['Volume']
