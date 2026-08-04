@@ -1,6 +1,6 @@
 streamlit>=1.30.0
 pandas>=2.0.0
-yfinance>=0.2.38
 plotly
 requests
 lxml
+FinMind
