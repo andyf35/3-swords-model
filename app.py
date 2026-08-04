@@ -1,18 +1,27 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import time
+from FinMind.data import DataLoader
 
-# 1. 網頁基本設定 (寬螢幕)
-st.set_page_config(page_title="三刀流全能戰情室 (專業旗艦版)", page_icon="⚔️", layout="wide")
-st.title("⚔️ 全能操盤戰情室 (專業旗艦版)")
+# 1. 初始化台灣證交所/櫃買中心開源資料庫介面
+api = DataLoader()
+
+# 2. 網頁基本設定 (寬螢幕)
+st.set_page_config(page_title="三刀流全能戰情室 (官方數據版)", page_icon="⚔️", layout="wide")
+st.title("⚔️ 全能操盤戰情室 (TWSE 官方數據旗艦版)")
 
 # ================= 🚦 大盤環境紅綠燈 =================
 @st.cache_data(ttl=300)
 def get_market_trend():
     try:
-        twii = yf.download("^TWII", period="6mo", interval="1d", progress=False).ffill()
-        close_s = twii['Close'].iloc[:, 0] if isinstance(twii['Close'], pd.DataFrame) else twii['Close']
+        # 取得加權指數 (TAIEX) 近半年資料
+        start_date = (pd.Timestamp.now() - pd.Timedelta(days=150)).strftime('%Y-%m-%d')
+        df = api.taiwan_stock_daily(stock_id='TAIEX', start_date=start_date)
+        if df.empty:
+            return 0, 0, True
+            
+        close_s = df['close']
         ma60 = float(close_s.rolling(60).mean().iloc[-1])
         cp = float(close_s.iloc[-1])
         return cp, ma60, cp > ma60
@@ -26,46 +35,63 @@ else:
     st.error(f"🚦 **大盤環境：🔴 紅燈警戒** (加權指數 {market_cp:.0f} 跌破季線 {market_ma60:.0f}，系統性風險升高，強制減碼或觀望)")
 st.markdown("---")
 
-# 2. 建立雙分頁架構
+# 3. 建立雙分頁架構
 tab_single, tab_radar = st.tabs(["🎯 單兵深度偵蒐與決策", "🔥 自動化戰略選股雷達"])
 
 # ================= TAB 1: 單兵深度偵蒐與決策 =================
 with tab_single:
     col_input1, col_input2 = st.columns([2, 1])
     with col_input1:
-        user_input = st.text_input("請輸入台股代碼 (例如：00878 或 2308)", "2308", key="single_input")
+        user_input = st.text_input("請輸入台股代碼 (直接輸入數字，例如：00878 或 2308)", "2308", key="single_input")
     with col_input2:
         asset_type = st.selectbox("資產屬性", ["一般個股", "高股息/防禦ETF"], key="single_asset_type")
 
-    stock_symbol = f"{user_input}.TW" if not (user_input.endswith(".TW") or user_input.endswith(".TWO")) else user_input
-    st.subheader(f"當前監控標的: {stock_symbol} ({asset_type})")
+    # 過濾掉可能殘留的 .TW 尾綴
+    raw_symbol = user_input.replace('.TW', '').replace('.TWO', '').strip()
+    st.subheader(f"當前監控標的: {raw_symbol} ({asset_type})")
 
     @st.cache_data(ttl=300)
     def get_single_data(symbol):
-        data = yf.download(symbol, period="2y", interval="1d", progress=False)
-        return data.ffill() if not data.empty else data
+        # 抓取過去約 400 天，以確保能算出 240MA
+        start_date = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime('%Y-%m-%d')
+        try:
+            df = api.taiwan_stock_daily(stock_id=symbol, start_date=start_date)
+            if df.empty: return pd.DataFrame()
+            
+            # 將官方欄位名稱轉換為系統分析格式
+            df = df.rename(columns={'date': 'Date', 'open': 'Open', 'max': 'High', 'min': 'Low', 'close': 'Close', 'Trading_Volume': 'Volume'})
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.set_index('Date', inplace=True)
+            return df
+        except:
+            return pd.DataFrame()
 
-    df = get_single_data(stock_symbol)
+    df = get_single_data(raw_symbol)
 
-    ticker_obj = yf.Ticker(stock_symbol)
-    pe_ratio = ticker_obj.info.get('trailingPE', 'N/A')
-    
-    # 嘗試抓取殖利率 (若無則顯示 N/A)
+    # 🛡️ 安全防護：從證交所抓取本益比與殖利率
+    pe_ratio = 'N/A'
+    div_str = 'N/A'
     try:
-        div_yield = ticker_obj.info.get('dividendYield', None)
-        div_str = f"{div_yield * 100:.2f}%" if div_yield else "N/A"
+        info_date = (pd.Timestamp.now() - pd.Timedelta(days=15)).strftime('%Y-%m-%d')
+        info_df = api.taiwan_stock_per_pbr_and_dividend_yield(stock_id=raw_symbol, start_date=info_date)
+        if not info_df.empty:
+            pe_val = info_df['PER'].iloc[-1]
+            div_val = info_df['dividend_yield'].iloc[-1]
+            if pd.notna(pe_val) and pe_val > 0:
+                pe_ratio = round(pe_val, 2)
+            if pd.notna(div_val) and div_val > 0:
+                div_str = f"{div_val}%"
     except:
-        div_str = "N/A"
+        pass
 
     if df.empty:
-        st.error("⚠️ 找不到該檔股票的資料，請確認代碼是否正確。")
+        st.error("⚠️ 無法從證交所取得該檔股票資料，請確認代碼是否正確。")
     else:
-        # 資料處理
-        c_series = df['Close'].iloc[:, 0] if isinstance(df['Close'], pd.DataFrame) else df['Close']
-        v_series = df['Volume'].iloc[:, 0] if isinstance(df['Volume'], pd.DataFrame) else df['Volume']
-        o_series = df['Open'].iloc[:, 0] if isinstance(df['Open'], pd.DataFrame) else df['Open']
-        h_series = df['High'].iloc[:, 0] if isinstance(df['High'], pd.DataFrame) else df['High']
-        l_series = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
+        c_series = df['Close']
+        v_series = df['Volume']
+        o_series = df['Open']
+        h_series = df['High']
+        l_series = df['Low']
             
         df['月線_20MA'] = c_series.rolling(window=20).mean()
         df['季線_60MA'] = c_series.rolling(window=60).mean()
@@ -75,7 +101,6 @@ with tab_single:
         macd = c_series.ewm(span=12, adjust=False).mean() - c_series.ewm(span=26, adjust=False).mean()
         df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
-        # ATR 計算
         df['Prev_Close'] = c_series.shift(1)
         tr1 = h_series - l_series
         tr2 = (h_series - df['Prev_Close']).abs()
@@ -101,9 +126,7 @@ with tab_single:
         is_vol_surge = (current_vol > vol_5ma)
         is_below_240ma = (current_price < ma240)
 
-        # -------------------------------------------------------------
-        # 📈 視覺化動態 K 線與均線圖表
-        # -------------------------------------------------------------
+        # 📈 視覺化 K 線
         st.markdown("### 📈 戰情動態走勢圖 (近半年)")
         df_plot = df.iloc[-120:].copy() 
         fig = go.Figure(data=[go.Candlestick(x=df_plot.index, open=o_series.iloc[-120:], high=h_series.iloc[-120:], low=l_series.iloc[-120:], close=c_series.iloc[-120:], name="日K線")])
@@ -115,9 +138,6 @@ with tab_single:
 
         st.markdown("---")
         
-        # -------------------------------------------------------------
-        # 📋 進場檢核清單與決策
-        # -------------------------------------------------------------
         col_chk, col_dec = st.columns([1, 1.2])
         
         with col_chk:
@@ -126,12 +146,7 @@ with tab_single:
             c2 = "✅ 達成" if ma20 > ma60 else "❌ 未達標"
             c3 = "✅ 達成" if is_macd_bull else "❌ 未達標"
             c5 = "✅ 達成" if bias_60 < overheat_threshold else "❌ 過熱"
-            
-            if is_vol_surge:
-                c4 = "❌ 危險 (爆量下殺)" if (current_price < ma60 and not is_macd_bull) else "✅ 達成 (出量點火)"
-            else:
-                c4 = "❌ 未達標 (量能平淡)"
-                
+            c4 = "❌ 危險 (爆量下殺)" if (is_vol_surge and current_price < ma60 and not is_macd_bull) else ("✅ 達成 (出量點火)" if is_vol_surge else "❌ 未達標 (量能平淡)")
             c6 = "❌ 跌破 (年線失守)" if is_below_240ma else "✅ 達成 (長線保護)"
 
             st.markdown(f"""
@@ -163,17 +178,12 @@ with tab_single:
             elif color == "warning": st.warning(f"**{grade_title}**\n\n{grade_desc}")
             else: st.info(f"**{grade_title}**\n\n{grade_desc}")
 
-            # -------------------------------------------------------------
-            # 🛡️ 專業 ATR 動態風控與點位推演
-            # -------------------------------------------------------------
             if color == "success":
                 entry_high = current_price
                 entry_low = max(ma20, ma60) 
                 stop_loss = ma60 - (current_atr * 1.5) 
-                
                 risk_per_share = current_price - stop_loss
                 risk_per_1000 = max(0, risk_per_share * 1000)
-                
                 target_price = current_price + (risk_per_share * 2)
                 reward_per_1000 = (target_price - current_price) * 1000
 
@@ -188,9 +198,6 @@ with tab_single:
                 if risk_per_1000 > 10000:
                     st.warning("⚠️ 系統警示：由於該股近期波動率(ATR)過大或離季線較遠，單筆停損金額破萬。建議改買零股或等回檔縮小風險距離。")
 
-        # -------------------------------------------------------------
-        # 📊 底部數據面板 (改為上下兩行，確保所有指標完美呈現不擠壓)
-        # -------------------------------------------------------------
         st.markdown("---")
         st.markdown("### 📊 關鍵指標總覽")
         row1_c1, row1_c2, row1_c3, row1_c4 = st.columns(4)
@@ -200,7 +207,8 @@ with tab_single:
         row1_c4.metric("真實波動 (ATR)", f"{current_atr:.2f}")
 
         row2_c1, row2_c2, row2_c3 = st.columns(3)
-        row2_c1.metric("本益比 (PE)", f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A")
+        pe_display = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
+        row2_c1.metric("本益比 (PE)", pe_display)
         row2_c2.metric("預估殖利率", div_str)
         row2_c3.metric("最新日收盤價", f"{current_price:.2f}", delta=f"乖離率: {bias_60:.2f}%")
 
@@ -222,7 +230,7 @@ with tab_radar:
     if pool_etf: target_symbols.extend(list_etf)
     
     with st.expander("➕ 想要臨時另外手動加看其他股票嗎？"):
-        custom_add = st.text_input("輸入要額外加入的代碼 (用半形逗號隔開)：", value="")
+        custom_add = st.text_input("輸入要額外加入的代碼 (用半形逗號隔開，純數字即可)：", value="")
         if custom_add.strip():
             target_symbols.extend([s.strip() for s in custom_add.split(',') if s.strip()])
             
@@ -230,51 +238,74 @@ with tab_radar:
     only_recommend = st.checkbox("🌟 【僅顯示進攻與推薦標的】", value=False)
 
     if st.button("🚀 啟動自動化推薦雷達"):
-        with st.spinner('雷達全速運轉與流動性過濾中...'):
-            results = []
-            for raw_sym in target_symbols:
-                if not raw_sym: continue
-                symbol = f"{raw_sym}.TW" if not (raw_sym.endswith(".TW") or raw_sym.endswith(".TWO")) else raw_sym
-                try:
-                    df_r = yf.download(symbol, period="1y", interval="1d", progress=False).ffill()
-                    if not df_r.empty:
-                        c_s = df_r['Close'].iloc[:, 0] if isinstance(df_r['Close'], pd.DataFrame) else df_r['Close']
-                        v_s = df_r['Volume'].iloc[:, 0] if isinstance(df_r['Volume'], pd.DataFrame) else df_r['Volume']
-                        
-                        cp = float(c_s.iloc[-1])
-                        cv = float(v_s.iloc[-1])
-                        m60 = float(c_s.rolling(60).mean().iloc[-1])
-                        m20 = float(c_s.rolling(20).mean().iloc[-1])
-                        v5 = float(v_s.rolling(5).mean().iloc[-1])
-                        
-                        # 💧 流動性濾網 (日均成交額 > 1 億)
-                        daily_turnover = cp * cv
-                        is_liquid = daily_turnover >= 100_000_000
-
-                        b60 = ((cp - m60) / m60) * 100
-                        
-                        if not is_liquid:
-                            eval_res = "💧 流動性不足"
-                        elif b60 <= -15.0:
-                            eval_res = "🌟 分批低接" if (cp > m60 and m20 > m60) else "🛑 絕對不能買"
-                        elif b60 >= 15.0:
-                            eval_res = "⚠️ 減碼/勿追"
-                        elif cp > m60 and m20 > m60 and cv > v5:
-                            eval_res = "🔥 強烈買進"
-                        elif cp < m60 and m20 < m60:
-                            eval_res = "🛑 下行確認"
-                        else:
-                            eval_res = "⏳ 觀望打底"
-
-                        short_term = "⚡ 出量點火" if (cv > v5) else "💤 量縮整理"
-                            
-                        results.append({"代碼": raw_sym, "最新價": round(cp, 2), "乖離率(%)": round(b60, 2), "綜合訊號": eval_res, "短線動能": short_term})
-                except:
-                    pass
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        results = []
+        total_stocks = len(target_symbols)
+        
+        for i, raw_sym in enumerate(target_symbols):
+            if not raw_sym: continue
+            
+            # 清理代碼，對接台灣官方資料源只需純數字
+            clean_sym = raw_sym.replace('.TW', '').replace('.TWO', '')
+            status_text.text(f"📡 正在從證交所接收 {clean_sym} 的數據 ({i+1}/{total_stocks})...")
+            
+            try:
+                start_date = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime('%Y-%m-%d')
+                df_r = api.taiwan_stock_daily(stock_id=clean_sym, start_date=start_date)
+                
+                if not df_r.empty:
+                    c_s = df_r['close']
+                    v_s = df_r['Trading_Volume']
                     
-            if results:
-                dfr = pd.DataFrame(results)
-                if only_recommend: 
-                    dfr = dfr[dfr["綜合訊號"].isin(["🔥 強烈買進", "🌟 分批低接"])]
-                dfr = dfr.sort_values(by="最新價", ascending=False)
-                st.dataframe(dfr, use_container_width=True, hide_index=True)
+                    cp = float(c_s.iloc[-1])
+                    cv = float(v_s.iloc[-1])
+                    m60 = float(c_s.rolling(60).mean().iloc[-1])
+                    m20 = float(c_s.rolling(20).mean().iloc[-1])
+                    v5 = float(v_s.rolling(5).mean().iloc[-1])
+                    
+                    # 💧 流動性濾網 (日均成交額 > 1 億)
+                    daily_turnover = cp * cv
+                    is_liquid = daily_turnover >= 100_000_000
+
+                    b60 = ((cp - m60) / m60) * 100
+                    
+                    if not is_liquid:
+                        eval_res = "💧 流動性不足"
+                    elif b60 <= -15.0:
+                        eval_res = "🌟 分批低接" if (cp > m60 and m20 > m60) else "🛑 絕對不能買"
+                    elif b60 >= 15.0:
+                        eval_res = "⚠️ 減碼/勿追"
+                    elif cp > m60 and m20 > m60 and cv > v5:
+                        eval_res = "🔥 強烈買進"
+                    elif cp < m60 and m20 < m60:
+                        eval_res = "🛑 下行確認"
+                    else:
+                        eval_res = "⏳ 觀望打底"
+
+                    short_term = "⚡ 出量點火" if (cv > v5) else "💤 量縮整理"
+                        
+                    results.append({"代碼": clean_sym, "最新價": round(cp, 2), "乖離率(%)": round(b60, 2), "綜合訊號": eval_res, "短線動能": short_term})
+                
+                # 安全緩衝，遵守官方開源資料庫請求速率原則
+                time.sleep(0.1)
+                
+            except:
+                pass
+                
+            progress_bar.progress((i + 1) / total_stocks)
+            
+        status_text.text("✅ 雷達掃描完成！")
+        time.sleep(1)
+        status_text.empty()
+        progress_bar.empty()
+                
+        if results:
+            dfr = pd.DataFrame(results)
+            if only_recommend: 
+                dfr = dfr[dfr["綜合訊號"].isin(["🔥 強烈買進", "🌟 分批低接"])]
+            dfr = dfr.sort_values(by="最新價", ascending=False)
+            st.dataframe(dfr, use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ 目前暫無數據回傳，請確認伺服器連線狀態。")
